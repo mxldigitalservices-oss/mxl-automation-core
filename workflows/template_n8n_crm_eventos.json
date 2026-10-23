@@ -1,0 +1,181 @@
+{
+  "name": "Farol - Flujo Maestro de Eventos CRM",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "farol-webhook-eventos",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "2b2b2b2b-0001-0001-0001-000000000001",
+      "name": "Webhook - Eventos desde Railway",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "farol-webhook-eventos"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "cond-secret-valido",
+              "leftValue": "={{ $json.headers['x-webhook-secret'] }}",
+              "rightValue": "={{ $env.N8N_WEBHOOK_SECRET }}",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "2b2b2b2b-0002-0002-0002-000000000002",
+      "name": "IF - Secreto válido",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [460, 300],
+      "notes": "Rechaza cualquier llamada que no traiga el X-Webhook-Secret correcto. Evita que alguien dispare notificaciones falsas conociendo la URL del webhook."
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            { "conditions": { "conditions": [ { "leftValue": "={{ $json.body.tipo_evento }}", "rightValue": "lead_nuevo", "operator": { "type": "string", "operation": "equals" } } ] }, "outputKey": "lead_nuevo" },
+            { "conditions": { "conditions": [ { "leftValue": "={{ $json.body.tipo_evento }}", "rightValue": "magic_link_solicitado", "operator": { "type": "string", "operation": "equals" } } ] }, "outputKey": "magic_link_solicitado" },
+            { "conditions": { "conditions": [ { "leftValue": "={{ $json.body.tipo_evento }}", "rightValue": "cambio_estado", "operator": { "type": "string", "operation": "equals" } } ] }, "outputKey": "cambio_estado" },
+            { "conditions": { "conditions": [ { "leftValue": "={{ $json.body.tipo_evento }}", "rightValue": "proyecto_aprobado", "operator": { "type": "string", "operation": "equals" } } ] }, "outputKey": "proyecto_aprobado" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2b2b2b2b-0003-0003-0003-000000000003",
+      "name": "Switch - Tipo de Evento",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "notes": "Reemplaza este nodo por tu proveedor real: WhatsApp Business API, Twilio, o un nodo de Email (SMTP/SendGrid). El mensaje de bienvenida usa {{ $json.body.nombre }} y {{ $json.body.servicio }}.",
+        "method": "POST",
+        "url": "={{ $env.WHATSAPP_API_URL }}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "to", "value": "={{ $json.body.telefono }}" },
+            { "name": "message", "value": "=¡Hola {{ $json.body.nombre }}! Gracias por contactar a Farol Publicidad Digital. Recibimos tu solicitud de {{ $json.body.servicio }} y ya estamos trabajando en ella. Pronto tendrás acceso a tu portal de seguimiento." }
+          ]
+        },
+        "options": { "timeout": 10000 }
+      },
+      "id": "2b2b2b2b-0004-0004-0004-000000000004",
+      "name": "Enviar Bienvenida (WhatsApp/Email)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 140]
+    },
+    {
+      "parameters": {
+        "notes": "Construye el enlace mágico con el dominio de tu frontend en Vercel + el token generado por Railway. El token expira solo (MAGIC_LINK_TTL_MIN), así que este mensaje debe enviarse casi al instante.",
+        "method": "POST",
+        "url": "={{ $env.WHATSAPP_API_URL }}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "to", "value": "={{ $json.body.email }}" },
+            { "name": "message", "value": "=Hola {{ $json.body.nombre }}, aquí está tu acceso al portal de seguimiento: {{ $env.FRONTEND_URL }}/portal/verificar?token={{ $json.body.token }} (válido por tiempo limitado)" }
+          ]
+        },
+        "options": { "timeout": 10000 }
+      },
+      "id": "2b2b2b2b-0005-0005-0005-000000000005",
+      "name": "Enviar Enlace Mágico",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "notes": "Notifica al cliente que su proyecto cambió de estado (ej. 'En Producción' -> 'Entregado').",
+        "method": "POST",
+        "url": "={{ $env.WHATSAPP_API_URL }}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "to", "value": "={{ $json.body.telefono }}" },
+            { "name": "message", "value": "=Tu proyecto de {{ $json.body.servicio }} con Farol Publicidad Digital cambió de estado: ahora está '{{ $json.body.estado_nuevo }}'. Revisa el detalle en tu portal." }
+          ]
+        },
+        "options": { "timeout": 10000 }
+      },
+      "id": "2b2b2b2b-0006-0006-0006-000000000006",
+      "name": "Notificar Cambio de Estado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 460]
+    },
+    {
+      "parameters": {
+        "notes": "Confirma al cliente que su proyecto fue aprobado y entra a producción.",
+        "method": "POST",
+        "url": "={{ $env.WHATSAPP_API_URL }}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "to", "value": "={{ $json.body.telefono }}" },
+            { "name": "message", "value": "=¡Buenas noticias! Tu proyecto de {{ $json.body.servicio }} fue aprobado por el Director y ya entró en producción." }
+          ]
+        },
+        "options": { "timeout": 10000 }
+      },
+      "id": "2b2b2b2b-0007-0007-0007-000000000007",
+      "name": "Notificar Aprobación",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 620]
+    },
+    {
+      "parameters": { "respondWith": "json", "responseBody": "={{ { \"recibido\": true } }}" },
+      "id": "2b2b2b2b-0008-0008-0008-000000000008",
+      "name": "Responder OK a Railway",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": { "respondWith": "json", "responseCode": 403, "responseBody": "={{ { \"error\": \"secreto invalido\" } }}" },
+      "id": "2b2b2b2b-0009-0009-0009-000000000009",
+      "name": "Responder 403",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [460, 500]
+    }
+  ],
+  "connections": {
+    "Webhook - Eventos desde Railway": { "main": [[ { "node": "IF - Secreto válido", "type": "main", "index": 0 } ]] },
+    "IF - Secreto válido": {
+      "main": [
+        [ { "node": "Switch - Tipo de Evento", "type": "main", "index": 0 } ],
+        [ { "node": "Responder 403", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Switch - Tipo de Evento": {
+      "main": [
+        [ { "node": "Enviar Bienvenida (WhatsApp/Email)", "type": "main", "index": 0 } ],
+        [ { "node": "Enviar Enlace Mágico", "type": "main", "index": 0 } ],
+        [ { "node": "Notificar Cambio de Estado", "type": "main", "index": 0 } ],
+        [ { "node": "Notificar Aprobación", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Enviar Bienvenida (WhatsApp/Email)": { "main": [[ { "node": "Responder OK a Railway", "type": "main", "index": 0 } ]] },
+    "Enviar Enlace Mágico": { "main": [[ { "node": "Responder OK a Railway", "type": "main", "index": 0 } ]] },
+    "Notificar Cambio de Estado": { "main": [[ { "node": "Responder OK a Railway", "type": "main", "index": 0 } ]] },
+    "Notificar Aprobación": { "main": [[ { "node": "Responder OK a Railway", "type": "main", "index": 0 } ]] }
+  },
+  "pinData": {},
+  "settings": { "executionOrder": "v1" },
+  "staticData": null,
+  "meta": { "instanceId": "farol-crm-eventos" }
+}

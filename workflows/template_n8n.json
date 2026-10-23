@@ -1,0 +1,284 @@
+{
+  "name": "mxl-pro - Flujo Maestro Gemini Balanceado",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mxl-webhook-entrada",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "1a1a1a1a-0001-0001-0001-000000000001",
+      "name": "Webhook - Entrada del Cliente",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "mxl-webhook-entrada"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BALANCER_URL }}/solicitar-llave",
+        "options": {
+          "timeout": 10000
+        },
+        "sendHeaders": false
+      },
+      "id": "1a1a1a1a-0002-0002-0002-000000000002",
+      "name": "Solicitar Llave al Balanceador",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-status-ok",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "OK",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1a1a1a1a-0003-0003-0003-000000000003",
+      "name": "IF - Status es OK",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={{ $env[$('Solicitar Llave al Balanceador').item.json.key_alias] }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [{\n    \"parts\": [{ \"text\": $('Webhook - Entrada del Cliente').item.json.body.mensaje }]\n  }]\n}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "1a1a1a1a-0004-0004-0004-000000000004",
+      "name": "Llamar a Gemini API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 200],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BALANCER_URL }}/registrar-resultado",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"key_alias\": $('Solicitar Llave al Balanceador').item.json.key_alias,\n  \"exito\": true\n}",
+        "options": {}
+      },
+      "id": "1a1a1a1a-0005-0005-0005-000000000005",
+      "name": "Registrar Éxito",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 140]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BALANCER_URL }}/registrar-resultado",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"key_alias\": $('Solicitar Llave al Balanceador').item.json.key_alias,\n  \"exito\": false,\n  \"tipo_error\": $json.tipo_error_detectado || \"desconocido\"\n}",
+        "options": {}
+      },
+      "id": "1a1a1a1a-0006-0006-0006-000000000006",
+      "name": "Registrar Fallo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Clasifica el tipo de error devuelto por Gemini para que el\n// balanceador aplique la política correcta (cooldown vs desactivación permanente).\n// Ver auditoría Claude: 401/403 -> 'auth', 429 -> 'rate_limit', timeout -> 'timeout'.\n\nconst statusCode = $input.item.json.statusCode || $input.item.json.code || null;\nlet tipoError = 'desconocido';\n\nif (statusCode === 401 || statusCode === 403) {\n  tipoError = 'auth';\n} else if (statusCode === 429) {\n  tipoError = 'rate_limit';\n} else if (statusCode === 408 || statusCode === 504) {\n  tipoError = 'timeout';\n}\n\nreturn { json: { ...$input.item.json, tipo_error_detectado: tipoError } };"
+      },
+      "id": "1a1a1a1a-0007-0007-0007-000000000007",
+      "name": "Clasificar Tipo de Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 380]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-status-fatal",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "FATAL",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1a1a1a1a-0008-0008-0008-000000000008",
+      "name": "IF - Es FATAL",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 480]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"error\": true,\n  \"mensaje\": \"El sistema de llaves está temporalmente fuera de servicio. Contacte a soporte.\",\n  \"detalle\": $json.detail\n}",
+        "options": {
+          "responseCode": 503
+        }
+      },
+      "id": "1a1a1a1a-0009-0009-0009-000000000009",
+      "name": "Responder Error FATAL",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.2,
+      "position": [900, 560]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"error\": false,\n  \"respuesta\": $json.candidates ? $json.candidates[0].content.parts[0].text : \"\"\n}",
+        "options": {}
+      },
+      "id": "1a1a1a1a-0010-0010-0010-000000000010",
+      "name": "Responder al Cliente",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.2,
+      "position": [1340, 140]
+    }
+  ],
+  "connections": {
+    "Webhook - Entrada del Cliente": {
+      "main": [
+        [
+          {
+            "node": "Solicitar Llave al Balanceador",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Solicitar Llave al Balanceador": {
+      "main": [
+        [
+          {
+            "node": "IF - Status es OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Status es OK": {
+      "main": [
+        [
+          {
+            "node": "Llamar a Gemini API",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF - Es FATAL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Llamar a Gemini API": {
+      "main": [
+        [
+          {
+            "node": "Registrar Éxito",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Clasificar Tipo de Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar Éxito": {
+      "main": [
+        [
+          {
+            "node": "Responder al Cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clasificar Tipo de Error": {
+      "main": [
+        [
+          {
+            "node": "Registrar Fallo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Es FATAL": {
+      "main": [
+        [
+          {
+            "node": "Responder Error FATAL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder Error FATAL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateId": "mxl-pro-flujo-maestro-v1"
+  }
+}
